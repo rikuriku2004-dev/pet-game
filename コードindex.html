@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>ワンわん領土開拓史</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; }
+        #ui-panel {
+            position: absolute; top: 10px; left: 10px; z-index: 1000;
+            background: white; padding: 10px; border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); width: 180px;
+        }
+        #score-panel {
+            position: absolute; bottom: 30px; right: 20px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.9); padding: 10px; border-radius: 50%;
+            width: 70px; height: 70px; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; border: 4px solid #ff7800;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        #camera-btn {
+            position: absolute; bottom: 120px; right: 25px; z-index: 1000;
+            background: #2196F3; color: white; border: none; border-radius: 50%;
+            width: 60px; height: 60px; font-size: 30px; cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3); display: flex;
+            align-items: center; justify-content: center;
+        }
+        #camera-btn:active { background: #1976D2; transform: scale(0.9); }
+        #reset-btn { margin-top: 5px; font-size: 10px; padding: 2px 5px; cursor: pointer; color: red; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-panel">
+        <h3 style="margin:0; font-size:16px;">🐾 領土開拓中</h3>
+        <p id="status" style="font-size:12px; margin:5px 0;">GPS準備中...</p>
+        <button id="reset-btn" onclick="resetTerritory()">領土をリセット</button>
+    </div>
+
+    <button id="camera-btn" onclick="addPhotoMarker()">📷</button>
+
+    <div id="score-panel">
+        <div style="font-size: 10px; font-weight: bold;">領土</div>
+        <div id="area-size" style="font-size: 20px; font-weight: bold; color: #ff7800;">0</div>
+        <div style="font-size: 10px; font-weight: bold;">pt</div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 1. 地図初期化（南千住）
+        const map = L.map('map').setView([35.7334, 139.7994], 16);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        const territoryLayer = L.layerGroup().addTo(map);
+        const markerLayer = L.layerGroup().addTo(map);
+        const currentPosMarker = L.circleMarker([0, 0], {radius: 8, color: '#2196F3', fillOpacity: 1, weight: 3, fillColor: 'white'}).addTo(map);
+
+        // データ読み込み
+        let territoryData = JSON.parse(localStorage.getItem('myTerritory') || '[]');
+        let photoMarkers = JSON.parse(localStorage.getItem('photoMarkers') || '[]');
+        let lastPos = null;
+
+        // 復元処理
+        function init() {
+            territoryData.forEach(pos => drawTerritoryCircle(pos.lat, pos.lng));
+            photoMarkers.forEach(pos => drawPhotoMarker(pos.lat, pos.lng));
+            updateScore();
+        }
+
+        function drawTerritoryCircle(lat, lng) {
+            L.circle([lat, lng], { color: '#ff7800', fillColor: '#ff7800', fillOpacity: 0.3, radius: 25, stroke: false }).addTo(territoryLayer);
+        }
+
+        function drawPhotoMarker(lat, lng) {
+            L.marker([lat, lng]).addTo(markerLayer).bindPopup("📷 シャッターチャンス！");
+        }
+
+        // 領土追加
+        function addTerritory(lat, lng) {
+            drawTerritoryCircle(lat, lng);
+            territoryData.push({lat, lng});
+            localStorage.setItem('myTerritory', JSON.stringify(territoryData));
+            updateScore();
+        }
+
+        // カメラボタンが押されたとき
+        function addPhotoMarker() {
+            if (!lastPos) {
+                alert("まだ現在地が特定できていません");
+                return;
+            }
+            const lat = lastPos[0];
+            const lng = lastPos[1];
+            drawPhotoMarker(lat, lng);
+            photoMarkers.push({lat, lng});
+            localStorage.setItem('photoMarkers', JSON.stringify(photoMarkers));
+            alert("📷 マーカーを記録しました！");
+        }
+
+        function updateScore() {
+            document.getElementById('area-size').innerText = territoryData.length;
+        }
+
+        function resetTerritory() {
+            if(confirm("全てのデータを消去しますか？")) {
+                localStorage.clear();
+                location.reload();
+            }
+        }
+
+        init();
+
+        // GPS追跡
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition((position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                const newPos = [lat, lng];
+
+                currentPosMarker.setLatLng(newPos);
+                if (!lastPos) map.panTo(newPos);
+                
+                if (!lastPos || getDistance(lastPos, newPos) > 15) { 
+                    addTerritory(lat, lng);
+                    lastPos = newPos;
+                }
+                document.getElementById('status').innerText = "開拓中: 良好";
+            }, null, {enableHighAccuracy: true});
+        }
+
+        function getDistance(p1, p2) {
+            const R = 6371000;
+            const dLat = (p2[0] - p1[0]) * Math.PI / 180;
+            const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+            const a = Math.sin(dLat/2) ** 2 + Math.cos(p1[0] * Math.PI / 180) * Math.cos(p2[0] * Math.PI / 180) * Math.sin(dLon/2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+    </script>
+</body>
+</html>
